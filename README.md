@@ -1,6 +1,49 @@
 # ⚡ Quick Start Guide
 
-## 🎯 Running Locally (3 Simple Steps)
+## 🐳 Running with Docker (Recommended)
+
+The easiest way to run the application is with Docker. All services (database, backend, frontend) will start automatically.
+
+### Prerequisites
+```bash
+# Check if Docker is installed
+docker --version
+docker compose version
+```
+
+### Step 1: Configure Environment
+```bash
+cd /home/nguyen/code/fpt_practice/week_1
+
+# The .env file is already configured!
+# It contains database settings, email config, and secrets
+```
+
+### Step 2: Start All Services
+```bash
+# Build and start all containers
+docker compose up --build -d
+
+# Check status
+docker compose ps
+```
+
+### Step 3: Access the Application
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8000
+- **API Docs:** http://localhost:8000/docs
+- **Database:** localhost:5434
+
+### Stop Services
+```bash
+docker compose down
+```
+
+📖 **For detailed Docker instructions, see [DOCKER_GUIDE.md](./DOCKER_GUIDE.md)**
+
+---
+
+## 💻 Running Locally (3 Simple Steps)
 
 ### Step 1: Setup Database (Choose One Option)
 

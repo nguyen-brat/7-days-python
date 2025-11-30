@@ -74,6 +74,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 def ping():
     return {"status": "ok"}
 
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
+
 # Auth Routes
 @app.post("/token", response_model=schemas.Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):

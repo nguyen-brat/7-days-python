@@ -27,37 +27,60 @@ docker compose version
 
 ## 🚀 **Quick Start**
 
-### **1. Build and Run Everything**
+### **1. Configure Environment (First Time Only)**
 
 ```bash
 cd /home/nguyen/code/fpt_practice/week_1
 
-# Build and start all services
+# Check .env file exists (already configured)
+cat .env
+
+# Optional: Customize email settings if needed
+nano .env
+```
+
+The `.env` file contains:
+- Database credentials
+- JWT secret key
+- Email/SMTP configuration
+- API URLs
+
+**Important:** Never commit `.env` to git! Use `.env.example` for documentation.
+
+### **2. Build and Run Everything**
+
+```bash
+# Build and start all services in detached mode
+docker compose up --build -d
+
+# Or run in foreground to see logs
 docker compose up --build
 ```
 
 **What this does:**
-- ✅ Builds backend Docker image
-- ✅ Builds frontend Docker image
-- ✅ Pulls PostgreSQL image
-- ✅ Creates network for services
-- ✅ Starts all containers
-- ✅ Shows logs in terminal
+- ✅ Builds backend Docker image (Python 3.13)
+- ✅ Builds frontend Docker image (Node 22 + Nginx)
+- ✅ Pulls PostgreSQL 15-alpine image
+- ✅ Creates app-network for services
+- ✅ Starts all containers with health checks
+- ✅ Persists database data in volume
 
-### **2. Access the Application**
+### **3. Access the Application**
 
 - **Frontend:** http://localhost:3000
 - **Backend API:** http://localhost:8000
 - **API Docs:** http://localhost:8000/docs
-- **Database:** localhost:5432
+- **Health Check:** http://localhost:8000/health
+- **Database:** localhost:5434 (Note: Changed from default 5432)
 
-### **3. Stop Everything**
+### **4. Stop Everything**
 
 ```bash
-# Press Ctrl+C in the terminal
-
-# Or in another terminal:
+# Stop services (keeps data)
 docker compose down
+
+# Stop and remove data (⚠️ deletes database!)
+docker compose down -v
 ```
 
 ---
@@ -75,7 +98,7 @@ docker compose down
 │  └──────────┘  └──────────┘  └──────────┘ │
 │       ↓              ↓              ↓      │
 └───────┼──────────────┼──────────────┼──────┘
-     3000:80        8000:8000      5432:5432
+     3000:80        8000:8000      5434:5432
         │              │              │
     Browser         API Calls     Database
 ```
@@ -86,30 +109,39 @@ docker compose down
 
 ### **1. Database (PostgreSQL)**
 - **Image:** postgres:15-alpine
-- **Port:** 5432:5432
+- **Internal Port:** 5432
+- **External Port:** 5434 (to avoid conflict with local PostgreSQL)
 - **Volume:** postgres_data (persists data)
-- **Healthcheck:** Monitors database readiness
+- **Credentials:** From .env file (default: postgres/postgres)
+- **Healthcheck:** `pg_isready` monitors database readiness
+- **Database Name:** user_management
 
 ### **2. Backend (FastAPI)**
 - **Build:** From ./user_management/backend/Dockerfile
+- **Base Image:** python:3.13-slim
 - **Port:** 8000:8000
-- **Dependencies:** All Python packages (fastapi, sqlalchemy, etc.)
+- **User:** Non-root user (uid: 1000)
+- **Dependencies:** Installed from requirements.txt
 - **Features:**
-  - JWT authentication
-  - Email sending (Gmail SMTP)
-  - Database connection
-  - Hot reload enabled
+  - JWT authentication (configurable via .env)
+  - Email sending via SMTP (Gmail support)
+  - PostgreSQL database connection
+  - Hot reload enabled for development
+  - Health check endpoint: /health
+- **Environment:** Configured via .env file
 
-### **3. Frontend (React + Nginx)**
+### **3. Frontend (React + Vite + Nginx)**
 - **Build:** Multi-stage Dockerfile
-  - Stage 1: Node 22 (build React app)
-  - Stage 2: Nginx (serve static files)
-- **Port:** 3000:80
+  - Stage 1: Node 22-alpine (builds React app with Vite)
+  - Stage 2: Nginx 1.27-alpine (serves static files)
+- **Port:** 3000:80 (host:container)
 - **Features:**
   - Production-optimized build
-  - Gzip compression
-  - SPA routing
-  - Security headers
+  - Gzip compression enabled
+  - SPA routing support
+  - Security headers (X-Frame-Options, X-XSS-Protection, etc.)
+  - Cache control for assets
+  - Small image size (~50MB)
 
 ---
 
@@ -212,15 +244,25 @@ docker compose ps
 
 **Expected output:**
 ```
-NAME                  STATUS    PORTS
-user_mgmt_db          Up        0.0.0.0:5432->5432/tcp
-user_mgmt_backend     Up        0.0.0.0:8000->8000/tcp
-user_mgmt_frontend    Up        0.0.0.0:3000->80/tcp
+NAME                  STATUS                  PORTS
+user_mgmt_db          Up (healthy)           0.0.0.0:5434->5432/tcp
+user_mgmt_backend     Up (healthy)           0.0.0.0:8000->8000/tcp
+user_mgmt_frontend    Up (health: starting)  0.0.0.0:3000->80/tcp
 ```
+
+Note: All services have health checks. Wait a few seconds for them to become healthy.
 
 ### **Test 2: Check Backend Health**
 
 ```bash
+# Health check endpoint
+curl http://localhost:8000/health
+```
+
+**Expected:** `{"status":"healthy"}`
+
+```bash
+# Legacy ping endpoint also works
 curl http://localhost:8000/ping
 ```
 
@@ -232,15 +274,26 @@ curl http://localhost:8000/ping
 curl -I http://localhost:3000
 ```
 
-**Expected:** `200 OK` with HTML content
+**Expected:** `HTTP/1.1 200 OK` with HTML content
+
+```bash
+# Or get the full HTML
+curl http://localhost:3000
+```
 
 ### **Test 4: Check Database**
 
 ```bash
+# Connect to database
 docker compose exec db psql -U postgres -d user_management -c "\dt"
 ```
 
 **Expected:** List of tables (users, email_templates, email_logs)
+
+```bash
+# Check database connection from host
+psql -h localhost -p 5434 -U postgres -d user_management -c "SELECT version();"
+# Password: postgres (from .env)
 
 ### **Test 5: Full Application Test**
 
@@ -270,12 +323,19 @@ docker compose exec db psql -U postgres -d user_management -c "\dt"
 **Solution:**
 ```bash
 # Find process using port
-lsof -i :3000
-lsof -i :8000
-lsof -i :5432
+lsof -i :3000   # Frontend
+lsof -i :8000   # Backend
+lsof -i :5434   # Database (changed from default 5432)
 
-# Kill local services or change ports in docker-compose.yml
+# Kill the process
+lsof -ti:8000 | xargs kill -9
+
+# Or change ports in docker-compose.yml:
+# ports:
+#   - "3001:80"    # Use different host port
 ```
+
+**Why port 5434?** Port 5432 is often used by local PostgreSQL. We use 5434 to avoid conflicts.
 
 ### **Problem 2: Database Connection Failed**
 
@@ -346,45 +406,66 @@ docker compose logs backend
 
 ## 📊 **Environment Variables**
 
-### **Backend (.env or docker-compose.yml)**
+All configuration is managed through the `.env` file. Docker Compose automatically loads it.
 
-```yaml
-# Database
-DATABASE_URL: postgresql://postgres:postgres@db:5432/user_management
+### **Current .env Configuration**
 
-# Authentication
-SECRET_KEY: your_secret_key_here
-ALGORITHM: HS256
-ACCESS_TOKEN_EXPIRE_MINUTES: 30
+```env
+# Database Configuration
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=user_management
+DATABASE_URL=postgresql://postgres:postgres@db:5432/user_management
 
-# Email
-EMAIL_DEVELOPMENT_MODE: "false"
-SMTP_HOST: smtp.gmail.com
-SMTP_PORT: 587
-SMTP_USERNAME: your.email@gmail.com
-SMTP_PASSWORD: your_app_password
-SMTP_FROM_EMAIL: your.email@gmail.com
-SMTP_FROM_NAME: Your App Name
+# JWT Authentication
+SECRET_KEY=supersecretkey123
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Email Configuration
+EMAIL_DEVELOPMENT_MODE=false
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your.email@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_FROM_EMAIL=your.email@gmail.com
+SMTP_FROM_NAME=User Management System
+
+# API Configuration (for frontend)
+VITE_API_URL=http://localhost:8000
 ```
 
 ### **How to Update:**
 
-**Option 1: Edit docker-compose.yml directly**
+**Edit .env file:**
 ```bash
-nano docker-compose.yml
-# Edit environment section
-docker compose up --build
+nano .env
+# Make your changes
+docker compose down
+docker compose up --build -d
 ```
 
-**Option 2: Use .env file**
-```bash
-# Create .env.docker
-DATABASE_URL=postgresql://postgres:postgres@db:5432/user_management
-SECRET_KEY=newsecretkey
+**Important Notes:**
+- ✅ `.env` is already configured and gitignored
+- ✅ Use `.env.example` as a template for new setups
+- ⚠️ Never commit `.env` with real secrets to git
+- ⚠️ Change `SECRET_KEY` in production!
+- ⚠️ Use strong passwords for `POSTGRES_PASSWORD`
 
-# Reference in docker-compose.yml
-env_file:
-  - .env.docker
+### **Email Setup:**
+
+**For Gmail:**
+1. Enable 2-factor authentication
+2. Create app password: https://myaccount.google.com/apppasswords
+3. Update `.env`:
+   ```env
+   SMTP_USERNAME=your.email@gmail.com
+   SMTP_PASSWORD=your_16_char_app_password
+   ```
+
+**For Development (Mock Emails):**
+```env
+EMAIL_DEVELOPMENT_MODE=true
 ```
 
 ---
@@ -479,23 +560,64 @@ services:
 
 ## 🔐 **Security Best Practices**
 
-1. ✅ **Don't commit secrets**
-   - Use .env files
-   - Add .env to .gitignore
+### **Implemented Security Features:**
 
-2. ✅ **Use specific image versions**
-   - ✅ `postgres:15-alpine` (good)
-   - ❌ `postgres:latest` (bad)
+1. ✅ **Environment-based secrets**
+   - All secrets in `.env` file (gitignored)
+   - `.env.example` for documentation
+   - No hardcoded credentials in docker-compose.yml
 
-3. ✅ **Run as non-root** (already configured in Dockerfiles)
+2. ✅ **Specific image versions**
+   - `postgres:15-alpine` (not latest)
+   - `python:3.13-slim` (specific version)
+   - `node:22-alpine` (stable version)
+   - `nginx:1.27-alpine` (specific version)
 
-4. ✅ **Use .dockerignore** (excludes sensitive files)
+3. ✅ **Non-root user execution**
+   - Backend runs as `appuser` (uid: 1000)
+   - No root privileges for application processes
+   - Configured in Dockerfiles
 
-5. ✅ **Keep images updated**
-   ```bash
-   docker compose pull
-   docker compose up -d
-   ```
+4. ✅ **Docker security files**
+   - `.dockerignore` excludes sensitive files
+   - Prevents copying .env, credentials, etc. into images
+
+5. ✅ **Layer optimization**
+   - Dependencies cached separately from code
+   - Faster rebuilds, smaller attack surface
+
+6. ✅ **Health checks**
+   - Database health monitoring
+   - Backend health endpoint
+   - Frontend availability check
+   - Automatic restart on failure
+
+### **Production Recommendations:**
+
+```bash
+# 1. Change default credentials
+POSTGRES_PASSWORD=<strong-random-password>
+SECRET_KEY=<256-bit-random-key>
+
+# 2. Use secrets management
+docker secret create db_password password.txt
+
+# 3. Enable read-only root filesystem
+read_only: true
+tmpfs:
+  - /tmp
+
+# 4. Limit resources
+deploy:
+  resources:
+    limits:
+      cpus: '0.5'
+      memory: 512M
+
+# 5. Keep images updated
+docker compose pull
+docker compose up -d
+```
 
 ---
 
@@ -536,30 +658,43 @@ chmod +x start.sh stop.sh logs.sh
 
 ### **Quick Commands:**
 ```bash
-# Start
+# Start all services
 docker compose up -d --build
+
+# Check status
+docker compose ps
 
 # View logs
 docker compose logs -f
 
-# Stop
+# Stop services
 docker compose down
 
-# Rebuild
-docker compose build --no-cache
+# Rebuild specific service
+docker compose build backend --no-cache
 
-# Clean
+# Full cleanup (⚠️ deletes data!)
 docker compose down -v && docker system prune -a
 ```
 
-### **URLs:**
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+### **Access URLs:**
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8000
+- **API Documentation:** http://localhost:8000/docs
+- **Health Check:** http://localhost:8000/health
+- **Database:** localhost:5434
 
 ### **Default Credentials:**
-- Database: postgres / postgres
-- Admin: (create via registration)
+- **Database:** postgres / postgres (from .env)
+- **User Account:** Create via registration at http://localhost:3000/register
+
+### **Configuration Files:**
+- **docker-compose.yml** - Service orchestration
+- **.env** - Environment variables and secrets
+- **Dockerfile (backend)** - Backend image build
+- **Dockerfile (frontend)** - Frontend image build
+- **requirements.txt** - Python dependencies
+- **package.json** - Node dependencies
 
 ---
 

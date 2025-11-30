@@ -5,19 +5,22 @@ services:
     container_name: user_mgmt_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: user_management
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-user_management}
     ports:
-      - "5432:5432"
+      - "5434:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - app-network
+    restart: unless-stopped
 
   # --- Backend Service ---
   backend:
@@ -29,30 +32,21 @@ services:
       - ./user_management/backend:/app
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      # Database
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/user_management
-
-      # JWT Authentication
-      SECRET_KEY: supersecretkey123
-      ALGORITHM: HS256
-      ACCESS_TOKEN_EXPIRE_MINUTES: 30
-
-      # Email Configuration
-      EMAIL_DEVELOPMENT_MODE: "false"
-      SMTP_HOST: smtp.gmail.com
-      SMTP_PORT: 587
-      SMTP_USERNAME: julius.2003.no.2@gmail.com
-      SMTP_PASSWORD: zwmmulcpwlebfslw
-      SMTP_FROM_EMAIL: julius.2003.no.2@gmail.com
-      SMTP_FROM_NAME: User Management System
-
       # Python
       PYTHONPATH: /app
       PYTHONUNBUFFERED: 1
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     networks:
       - app-network
     restart: unless-stopped
@@ -65,10 +59,17 @@ services:
     container_name: user_mgmt_frontend
     ports:
       - "3000:80"
-    environment:
-      - VITE_API_URL=http://localhost:8000
+    env_file:
+      - .env
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
     networks:
       - app-network
     restart: unless-stopped

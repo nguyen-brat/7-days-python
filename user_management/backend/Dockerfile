@@ -1,30 +1,36 @@
 FROM python:3.13-slim
 
+# Set working directory
 WORKDIR /app
 
-# Install uv
-RUN pip install --no-cache-dir uv
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy backend application
+# Copy requirements file first for better layer caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
 COPY . .
 
-# Install dependencies directly
-RUN pip install --no-cache-dir \
-    fastapi>=0.121.3 \
-    python-jose[cryptography]>=3.3.0 \
-    passlib[bcrypt]>=1.7.4 \
-    bcrypt==4.0.1 \
-    psycopg2-binary>=2.9.11 \
-    python-dotenv>=1.2.1 \
-    sqlalchemy>=2.0.44 \
-    uvicorn>=0.38.0 \
-    pydantic[email]>=2.0.0 \
-    python-multipart>=0.0.9 \
-    aiosmtplib>=3.0.0 \
-    jinja2>=3.1.0
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8000
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
 # Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
